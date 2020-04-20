@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-test
+  labels:
+    app: app-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-test
+  template:
+    metadata:
+      labels:
+        app: app-test
+    spec:
+      containers:
+      - name: browser
+        image: nrcandidatelab/nrcl_selenium_browser:latest
+        ports:
+        - containerPort: 4444
+      - name: traffic
+        image: jmbrinkman/nrcl_traffic_new:latest
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /app
+          name: script
+      volumes:
+      - name: script
+        hostPath:
+          path: /2/new_relic/script
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels:
+    app: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      initContainers:
+      - name: init
+        image: busybox:1.28
+        command: [ 'sh','-c','cp /war_source/ROOT.war /war_target;cp /nr_source/* /nr_target']
+        volumeMounts:
+        - mountPath: /war_source
+          name: war-source
+        - mountPath: /war_target
+          name: war-target
+        - mountPath: /nr_source
+          name: nr-source
+        - mountPath: /nr_target
+          name: nr-target
+      containers:
+      - name: mysql
+        image: nrcandidatelab/nrcl_mysql:latest
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "password"
+        - name: MYSQL_USER
+          value: "shopizer"
+        - name: MYSQL_PASSWORD
+          value: "password"
+        - name: MYSQL_DATABASE
+          value: "SALESMANAGER"
+        ports:
+        - containerPort: 3306
+          hostPort: 3306
+        volumeMounts:
+        - mountPath: /var/lib/sql
+          name: mysqldata
+      - name: storefront
+        image: tomcat
+        ports:
+        - containerPort: 8080
+          hostPort: 8080
+        volumeMounts:
+        - mountPath: /usr/local/tomcat/webapps
+          name: war-target
+        - mountPath: /usr/local/tomcat/opt/nr-agent
+          name: nr-target
+        env:
+        - name: NEW_RELIC_APP_NAME
+          value: 'Shopizer'
+        - name: NEW_RELIC_LICENSE_KEY
+          value: 'eu01xx24aded9f9a23d7c22f2f7b4531689bNRAL'
+        - name: JAVA_OPTS
+          value: "-javaagent:/usr/local/tomcat/opt/nr-agent/newrelic.jar"
+        - name: CATALINA_OPTS
+          value: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=9000 -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.authenticate=false"
+      volumes:
+      - name: war-source
+        hostPath:
+          path: /2/new_relic/war_source
+      - name: nr-source
+        hostPath:
+          path: /2/new_relic/nr_source
+      - name: war-target
+        emptyDir: {}
+      - name: nr-target
+        emptyDir: {}
+      - name: mysqldata
+        hostPath:
+          path: /2/new_relic/mysqldata
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  namespace: default
+spec:
+  ports:
+  - name: tomcat
+    nodePort: 32380
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  - name: mysql
+    nodePort: 32381
+    port: 3306
+    protocol: TCP
+    targetPort: 3306
+  - name: jmx
+    nodePort: 32382
+    port: 9000
+    protocol: TCP
+    targetPort: 9000
+  selector:
+    app: app
+  sessionAffinity: None
+  type: NodePort
+status:
+  loadBalancer: {}
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-test
+  namespace: default
+spec:
+  ports:
+  - name: selenium
+    nodePort: 32383
+    port: 4444
+    protocol: TCP
+    targetPort: 4444
+  - name: traffic
+    nodePort: 32384
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: app-test
+  sessionAffinity: None
+  type: NodePort
+status:
+  loadBalancer: {}
